@@ -1,5 +1,5 @@
 // Offline support: app ki apni files cache mein. Data (Drive/AI) kabhi cache nahi hota.
-const CACHE = 'pdock-v2';
+const CACHE = 'pdock-v3';
 const FILES = ['./', 'index.html', 'style.css', 'manifest.json', 'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png',
   'js/app.js', 'js/vault.js', 'js/model.js', 'js/crypto.js', 'js/idb.js', 'js/drive.js', 'js/config.js', 'js/passkey.js',
   'js/extract.js', 'js/calendar.js', 'js/pipeline.js', 'js/ocr.js', 'js/ai.js', 'js/actions.js', 'js/places.js'];
