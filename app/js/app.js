@@ -7,6 +7,7 @@ import { DOC_TYPES } from './extract.js';
 import { icsFile } from './calendar.js';
 import { applyActions, undoAction } from './actions.js';
 import * as P from './places.js';
+import * as F from './facts.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const view = $('#view');
@@ -96,12 +97,24 @@ function showGate(html, onReady) {
   onReady?.();
 }
 
+// Profile feature se pehle daale gaye documents se bhi ek baar jaankari nikaalo
+async function backfillFacts() {
+  const s = S();
+  if (s.settings.facts_backfill_v1) return;
+  let n = 0;
+  for (const d of M.liveDocs(s)) if (d.status !== 'processing') n += learnFromDoc(d, []);
+  s.settings = { ...s.settings, facts_backfill_v1: true, updated_at: M.nowIso() };
+  await V.save();
+  if (n) toast(`🪪 Purane documents se ${n} jaankari Mera Profile mein judi`);
+}
+
 function showApp() {
   $('#gate').classList.add('hidden');
   $('#app').classList.remove('hidden');
+  backfillFacts().catch((e) => console.warn(e));
   updateSyncPill();
   route();
-  V.getMode().then((m) => { if (m === 'drive' && drive.hasToken()) V.sync().catch((e) => toast(e.message)); });
+  V.getMode().then((m) => { if (m === 'drive' && drive.hasToken()) V.sync().then(autoGmail).catch((e) => toast(e.message)); else autoGmail(); });
 }
 
 async function boot() {
@@ -259,9 +272,10 @@ async function updateSyncPill(state = {}) {
 async function syncNow() {
   if ((await V.getMode()) !== 'drive') { location.hash = '#/settings'; return; }
   try {
-    if (!drive.hasToken()) await drive.connect({ calendar: S().settings.calendar_sync });
+    if (!drive.hasToken()) await drive.connect({ calendar: S().settings.calendar_sync, gmail: S().settings.gmail_auto });
     await V.sync();
     toast('Sync ho gaya');
+    autoGmail();
   } catch (e) { toast(e.message); updateSyncPill({ syncError: e.message }); }
 }
 $('#sync-pill').onclick = syncNow;
@@ -462,9 +476,10 @@ async function onAsk(e) {
           people: M.livePeople(s),
           relevantDocIds: hits.filter((h) => h.kind === 'doc').slice(0, 5).map((h) => h.id),
           profile: s.profile.text,
+          facts: F.profileText(s),
           here: nearbyPlaceName,
         });
-        const saved = applyActions(s, r.actions || []);
+        const saved = applyActions(s, r.actions || [], { kind: 'chat', id: null, label: 'Aapne bataya' });
         if (saved.length) V.audit('chat_saved', saved.map((x) => x.label.split(' ')[0]).join(' '));
         reply = { text: r.answer, sources: r.sources || [], saved };
       }
@@ -576,11 +591,13 @@ async function runPipeline(id, bytes) {
   const d = S().docs[id];
   try {
     const info = await processDocument({
-      bytes, mime: d.mime, fileName: d.file_name, settings: S().settings, profile: S().profile.text,
+      bytes, mime: d.mime, fileName: d.file_name, settings: S().settings, profile: ownerInfo(),
       onProgress: (t) => { progress.set(id, t); if (location.hash === '#/docs') loadDocs(); },
     });
     if (!V.isUnlocked()) return;
-    M.putDoc(S(), { ...S().docs[id], ...info, error: null });
+    const { profile_facts: aiFacts, ...docInfo } = info;
+    const doc = M.putDoc(S(), { ...S().docs[id], ...docInfo, error: null });
+    learnFromDoc(doc, aiFacts);
   } catch (e) {
     console.error(e);
     if (!V.isUnlocked()) return;
@@ -602,6 +619,22 @@ function billHtml(b) {
     ${items.length || b.total != null ? `<table class="items-table">${items.map((i) => `<tr><td>${esc(i.name)}${i.qty ? ` <span class="muted">× ${esc(i.qty)}</span>` : ''}</td><td>${rupees(i.amount)}</td></tr>`).join('')}
       ${b.total != null ? `<tr class="total"><td>Total</td><td>${rupees(b.total)}</td></tr>` : ''}</table>` : ''}
   </div>`;
+}
+
+// Owner kaun hai — AI ko batane ke liye (profile + "Mere baare mein" text)
+function ownerInfo() {
+  const s = S();
+  return [s.settings.owner_name && `Owner name: ${s.settings.owner_name}`, F.profileText(s, { maskIds: true }), s.profile.text].filter(Boolean).join('\n');
+}
+
+// Document se profile mein jaankari (bina AI: number/naam; AI ho to aur bhi)
+function learnFromDoc(doc, aiFacts = []) {
+  const s = S();
+  const source = { kind: 'doc', id: doc.id, label: doc.title };
+  const observed = doc.issue_date || doc.bill?.date || doc.created_at?.slice(0, 10);
+  const n = F.addFacts(s, F.localFacts(doc, s.settings.owner_name), source, observed) + F.ingestFacts(s, aiFacts, source, observed);
+  if (n) V.audit('profile_learned', `${n} · ${doc.title}`);
+  return n;
 }
 
 let previewUrl = null;
@@ -896,6 +929,52 @@ function lifePeople(s, box) {
 // GMAIL SE BILLS
 // =====================================================================
 let gmailResults = null;
+let gmailRunning = false;
+
+// Din mein ek baar (jab Google juda ho): naye bills laao + AI ho to kaam ke mails se seekho
+async function autoGmail(force = false) {
+  const s = S();
+  if (!s?.settings.gmail_auto || gmailRunning || !drive.hasToken(drive.SCOPE_GMAIL)) return;
+  const last = s.settings.gmail_last_scan;
+  if (!force && last && Date.now() - Date.parse(last) < 20 * 3600e3) return;
+  gmailRunning = true;
+  const today = M.nowIso().slice(0, 10);
+  try {
+    const G = await import('./gmail.js');
+    const days = last ? Math.min(400, Math.ceil((Date.now() - Date.parse(last)) / 864e5) + 2) : 60;
+    const have = new Set(M.liveDocs(S()).filter((d) => d.source?.gmail).map((d) => `${d.source.gmail}|${d.file_name}`));
+    let bills = 0;
+    let learned = 0;
+    for (const m of await G.findBills({ days, max: 40 })) {
+      for (const a of m.attachments) {
+        if (have.has(`${m.id}|${a.filename}`)) continue;
+        const bytes = await G.downloadAttachment(m.id, a.attachmentId);
+        await addDocument(bytes, a.filename, a.mimeType, { gmail: m.id, subject: m.subject.slice(0, 150), from: m.from.slice(0, 80), date: m.date });
+        bills++;
+      }
+      S().gmail_seen[m.id] = today;
+    }
+    if (S().settings.ai_key) {
+      const { learnFromEmail } = await import('./ai.js');
+      for (const id of await G.listMessageIds(G.buildLearnQuery(days), 25)) {
+        if (S().gmail_seen[id]) continue;
+        const msg = await G.readMessage(id);
+        const r = await learnFromEmail(S().settings.ai_key, { ...msg, ownerInfo: ownerInfo() });
+        if (r.useful) learned += applyActions(S(), r.actions || [], { kind: 'gmail', id, label: msg.subject.slice(0, 100) }).length;
+        S().gmail_seen[id] = today;
+      }
+    }
+    S().settings = { ...S().settings, gmail_last_scan: M.nowIso(), updated_at: M.nowIso() };
+    V.audit('gmail_auto', `${bills} bills, ${learned} nayi jaankari`);
+    await V.save();
+    if (bills || learned) toast(`📧 Gmail se ${bills} naye bills${learned ? `, ${learned} nayi jaankari` : ''}`);
+  } catch (e) {
+    console.warn(e);
+    toast(`Gmail: ${e.message}`);
+  } finally {
+    gmailRunning = false;
+  }
+}
 
 async function renderGmail() {
   const { hasToken, SCOPE_GMAIL } = drive;
@@ -942,6 +1021,7 @@ async function renderGmail() {
         try {
           const bytes = await downloadAttachment(m.id, a.attachmentId);
           await addDocument(bytes, a.filename, a.mimeType, { gmail: m.id, subject: m.subject.slice(0, 150), from: m.from.slice(0, 80), date: m.date });
+          S().gmail_seen[m.id] = M.nowIso().slice(0, 10);
         } catch (x) { toast(`${a.filename}: ${x.message}`); }
       }
       V.audit('gmail_import', `${n} files`);
@@ -977,21 +1057,83 @@ async function renderGmail() {
 // =====================================================================
 // ABOUT ME
 // =====================================================================
+function sourceLabel(src) {
+  if (!src) return '';
+  if (src.kind === 'doc') return S().docs[src.id] && !S().docs[src.id].deleted ? `<a href="#/doc/${esc(src.id)}">📄 ${esc(src.label)}</a>` : `📄 ${esc(src.label)}`;
+  if (src.kind === 'gmail') return `📧 ${esc(src.label)}`;
+  if (src.kind === 'manual') return '✍️ Aapne likha';
+  return `💬 ${esc(src.label || 'Chat')}`;
+}
+
 function renderMe() {
+  const s = S();
+  const view_ = F.profileView(s);
+  const items = Object.values(view_);
+  const total = items.reduce((t, it) => t + it.values.length, 0);
+  const conflicts = items.filter((it) => it.conflicts.length).length;
+  const factRow = (it, f) => `
+    <div class="fact">
+      <div class="fact-main"><div class="fact-label">${esc(it.label)}${f.confirmed ? ' <span class="badge ok">✓ pakka</span>' : ''}</div>
+        <div class="fact-value">${esc(f.value)}</div>
+        <div class="fact-src">${(f.sources || []).slice(-3).map(sourceLabel).join(' · ')}</div></div>
+      <div class="fact-actions"><button class="btn small" data-copy="${esc(f.value)}" title="Copy">📋</button>
+        <button class="btn small danger" data-reject="${esc(f.id)}" title="Galat hai">✕</button></div>
+    </div>`;
   view.innerHTML = `
-    <div class="head"><h2>Mere baare mein</h2></div>
-    <p class="muted">Jo baatein hamesha kaam aati hain — P-Dock har jawab mein inhe dhyaan mein rakhega.</p>
-    <form class="stack" id="me-form">
-      <textarea name="text" rows="16" placeholder="Naam: …
-Janm tithi: …
-Shahar / Pata: …
-Kaam: …
-Gaadi: …
-Family: …
-Blood group: …
-Pasand / Napasand: …">${esc(S().profile.text)}</textarea>
+    <div class="head"><h2>🪪 Mera Profile</h2>${total ? '<button class="btn" id="copy-all">📋 Sab copy karo</button>' : ''}</div>
+    <p class="muted">Documents, bills, Gmail aur aapki baaton se P-Dock yeh jaankari <strong>apne aap</strong> ikattha karta hai — form bharte waqt 📋 dabao aur paste karo.
+    ${total ? `Abhi ${total} jaankari${conflicts ? ` · <span class="warn-text">${conflicts} jagah alag-alag value mili — sahi wali chuno</span>` : ''}.` : ''}</p>
+    ${!total ? '<div class="card"><p>Abhi profile khaali hai. Aadhaar, PAN, DL jaise documents daalo, ya chat mein batao ("mera blood group B+ hai") — P-Dock khud bhar dega.</p></div>' : ''}
+    <div class="stack">
+    ${F.GROUPS.map(([g, title]) => {
+      const list = items.filter((it) => it.group === g);
+      if (!list.length) return '';
+      return `<div class="card sect"><h3>${esc(title)}</h3>${list.map((it) => `
+        ${it.values.map((f) => factRow(it, f)).join('')}
+        ${it.conflicts.length ? `<div class="conflict">⚠️ ${esc(it.label)} — alag value bhi mili:
+          ${it.conflicts.map((c) => `<div class="row wrap"><span>${esc(c.value)}</span><span class="fact-src">${(c.sources || []).slice(-2).map(sourceLabel).join(' · ')}</span>
+            <button class="btn small" data-confirm="${esc(c.id)}">Yeh sahi hai</button><button class="btn small" data-confirm="${esc(it.values[0].id)}">Upar wala sahi</button></div>`).join('')}</div>` : ''}`).join('')}</div>`;
+    }).join('')}
+    </div>
+
+    <form class="card stack spaced-top" id="fact-form">
+      <h3>+ Khud jodo</h3>
+      <div class="grid2"><select name="key">${Object.entries(F.FACT_KEYS).map(([k, [label]]) => `<option value="${k}">${esc(label)}</option>`).join('')}</select>
+      <input name="value" placeholder="Value" required maxlength="300"></div>
+      <div><button class="btn primary">Jodo</button></div>
+    </form>
+
+    <form class="card stack spaced-top" id="me-form">
+      <h3>📝 Aur baatein (khud likho)</h3>
+      <p class="muted">Jo kahin documents mein nahi — pasand/napasand, aadatein, family ki baatein. AI har jawab mein inhe dhyaan rakhega.</p>
+      <textarea name="text" rows="8" placeholder="Jaise: Beti: <naam>, 6 saal · Chai bina cheeni · Har Sunday mandir">${esc(s.profile.text)}</textarea>
       <div><button class="btn primary">Save</button></div>
     </form>`;
+
+  view.querySelectorAll('[data-copy]').forEach((b) => (b.onclick = () => navigator.clipboard.writeText(b.dataset.copy).then(() => toast('Copy ho gaya'))));
+  $('#copy-all')?.addEventListener('click', () => navigator.clipboard.writeText(F.profileText(S())).then(() => toast('Poora profile copy ho gaya')));
+  view.querySelectorAll('[data-reject]').forEach((b) => (b.onclick = async () => {
+    F.rejectFact(S(), b.dataset.reject);
+    V.audit('fact_rejected');
+    await V.save();
+    renderMe();
+  }));
+  view.querySelectorAll('[data-confirm]').forEach((b) => (b.onclick = async () => {
+    F.confirmFact(S(), b.dataset.confirm);
+    V.audit('fact_confirmed');
+    await V.save();
+    toast('Pakka kar diya');
+    renderMe();
+  }));
+  $('#fact-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = F.addFact(S(), { key: e.target.key.value, value: e.target.value.value, source: { kind: 'manual', id: null, label: 'Aapne likha' }, observed_at: M.nowIso().slice(0, 10) });
+    if (f) F.confirmFact(S(), f.id);
+    V.audit('fact_added');
+    await V.save();
+    toast('Jod diya');
+    renderMe();
+  };
   $('#me-form').onsubmit = async (e) => {
     e.preventDefault();
     S().profile = { text: e.target.text.value.slice(0, 20000), updated_at: M.nowIso() };
@@ -1009,7 +1151,8 @@ const AUDIT_LABEL = {
   document_download: 'Download', document_edit: 'Document edit', document_delete: 'Document delete', note_create: 'Yaad save',
   note_delete: 'Yaad hatai', profile_edit: 'Profile edit', ask: 'Sawaal poochha', password_changed: 'Password badla',
   passkey_added: 'Face ID joda', passkey_removed: 'Face ID hataya', recovery_code_changed: 'Naya recovery code',
-  gmail_scan: 'Gmail mein bills dhoondhe', gmail_import: 'Gmail se bills laaye',
+  gmail_scan: 'Gmail mein bills dhoondhe', gmail_import: 'Gmail se bills laaye', gmail_auto: 'Gmail apne aap dekha',
+  profile_learned: 'Profile mein jaankari judi', fact_confirmed: 'Profile: sahi maana', fact_rejected: 'Profile: galat hataya', fact_added: 'Profile: haath se joda',
   settings_changed: 'Settings badli',
 };
 
@@ -1034,8 +1177,10 @@ async function renderSettings() {
 
       <div class="card sect">
         <h3>📧 Gmail se bills</h3>
-        <p class="muted">Mail mein aaye bills, invoices, policies, tickets ke PDF ek click mein P-Dock mein. Sirf padhne ki permission; aap chunte ho kya aaye.</p>
-        <div><a class="btn primary" href="#/gmail">Gmail mein bills dhoondo</a></div>
+        <p class="muted">Mail mein aaye bills, invoices, policies, tickets ke PDF P-Dock mein. Sirf padhne ki permission — koi mail bheja ya mitaya nahi jaata.</p>
+        <label class="switch"><span>Roz apne aap Gmail dekho<br><span class="muted">Din mein ek baar (jab app kholo aur Google juda ho): naye bills apne aap aa jaayenge${s.settings.ai_key ? ', aur order / booking / policy / salary jaise mails se aapki jaankari, reminders aur yaadein bhi' : '. AI key lagao to mails se aapki jaankari bhi seekhega'}. Promotions aur social mail nahi dekhe jaate.</span></span>
+          <input type="checkbox" id="gm-auto" ${s.settings.gmail_auto ? 'checked' : ''}></label>
+        <div class="row wrap"><a class="btn" href="#/gmail">Haath se bills chuno</a>${s.settings.gmail_auto ? `<button class="btn" id="gm-now">Abhi dekho</button><span class="muted">Last: ${esc(ago(s.settings.gmail_last_scan) || 'kabhi nahi')}</span>` : ''}</div>
       </div>
 
       <div class="card sect">
@@ -1107,6 +1252,22 @@ async function renderSettings() {
     } catch (x) { e.target.checked = false; toast(x.message); }
   };
   $('#ics').onclick = () => download(icsFile(s), 'pdock-reminders.ics');
+  $('#gm-auto').onchange = async (e) => {
+    try {
+      if (e.target.checked && !drive.hasToken(drive.SCOPE_GMAIL)) await drive.connect({ gmail: true, calendar: s.settings.calendar_sync });
+      await settingsChanged({ gmail_auto: e.target.checked });
+      if (e.target.checked) { toast('Gmail dekh raha hoon…'); await autoGmail(true); }
+      renderSettings();
+    } catch (x) { e.target.checked = false; toast(x.message); }
+  };
+  $('#gm-now')?.addEventListener('click', async () => {
+    try {
+      if (!drive.hasToken(drive.SCOPE_GMAIL)) await drive.connect({ gmail: true, calendar: s.settings.calendar_sync });
+      toast('Gmail dekh raha hoon…');
+      await autoGmail(true);
+      renderSettings();
+    } catch (x) { toast(x.message); }
+  });
   $('#loc').onchange = async (e) => {
     if (e.target.checked) {
       try { await P.currentPosition(); } catch (x) { e.target.checked = false; toast(x.message); return; }

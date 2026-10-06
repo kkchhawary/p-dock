@@ -73,3 +73,49 @@ export async function downloadAttachment(messageId, attachmentId) {
   const data = await (await gfetch(`${API}/messages/${messageId}/attachments/${attachmentId}`)).json();
   return decodeBase64Url(data.data);
 }
+
+// ---------- mail se seekhna (AI ke saath) ----------
+const LEARN_WORDS = ['order', 'booking', 'booked', 'ticket', 'invoice', 'receipt', 'policy', 'premium', 'salary', 'payslip', 'appointment',
+  'report', 'statement', 'confirmed', 'delivered', 'registration', 'admission', 'renewal', 'due', 'PNR', 'itinerary', 'prescription'];
+
+export function buildLearnQuery(days = 30) {
+  return `newer_than:${Math.round(days)}d (${LEARN_WORDS.join(' OR ')}) -category:promotions -category:social -category:forums -in:chats -in:spam -in:trash`;
+}
+
+export async function listMessageIds(query, max = 25) {
+  const q = new URLSearchParams({ q: query, maxResults: String(max) });
+  const list = await (await gfetch(`${API}/messages?${q}`)).json();
+  return (list.messages || []).map((m) => m.id);
+}
+
+// HTML ko saaf text mein (script/style hata ke)
+export function htmlToText(html) {
+  return String(html)
+    .replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>|<\/(p|div|tr|li|h\d)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+}
+
+export function bodyText(payload) {
+  let plain = '';
+  let html = '';
+  const dec = new TextDecoder();
+  const walk = (p) => {
+    if (!p) return;
+    if (p.body?.data) {
+      const text = dec.decode(decodeBase64Url(p.body.data));
+      if (p.mimeType === 'text/plain' && !plain) plain = text;
+      else if (p.mimeType === 'text/html' && !html) html = text;
+    }
+    (p.parts || []).forEach(walk);
+  };
+  walk(payload);
+  return (plain || htmlToText(html)).slice(0, 12000);
+}
+
+export async function readMessage(id) {
+  const msg = await (await gfetch(`${API}/messages/${id}?format=full`)).json();
+  return { ...summarizeMessage(msg), text: bodyText(msg.payload) };
+}

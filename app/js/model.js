@@ -17,8 +17,10 @@ export function emptyState() {
     reminders: {}, // { text, due_date, place: {name, lat, lon}, done }
     money: {}, // udhaar: { direction: 'lent'|'borrowed', person, amount, date, due_date, phone, note, settled }
     people: {}, // { name, phone, relation }
+    facts: {}, // "Mera Profile": { key, value, sources[], observed_at, confirmed, rejected }
+    gmail_seen: {}, // Gmail message id → din (dobara process na ho)
     profile: { text: '', updated_at: '' },
-    settings: { owner_name: '', ai_key: '', ai_vision: false, calendar_sync: false, location_reminders: false, updated_at: '' },
+    settings: { owner_name: '', ai_key: '', ai_vision: false, calendar_sync: false, location_reminders: false, gmail_auto: false, gmail_last_scan: '', updated_at: '' },
     audit: [],
   };
 }
@@ -61,6 +63,8 @@ export function merge(a, b) {
     reminders: mergeRecords(a.reminders, b.reminders),
     money: mergeRecords(a.money, b.money),
     people: mergeRecords(a.people, b.people),
+    facts: mergeRecords(a.facts, b.facts),
+    gmail_seen: { ...(a.gmail_seen || {}), ...(b.gmail_seen || {}) },
     profile: newer(a.profile, b.profile),
     settings: newer(a.settings, b.settings),
     audit: [...audit.values()].sort((x, y) => (x.ts < y.ts ? -1 : 1)).slice(-AUDIT_LIMIT),
@@ -70,7 +74,7 @@ export function merge(a, b) {
 // Purane vault (naye collections se pehle ke) ko naye dhaanche mein laao
 export function normalize(s) {
   const base = emptyState();
-  for (const k of ['docs', 'notes', 'reminders', 'money', 'people']) s[k] ||= {};
+  for (const k of ['docs', 'notes', 'reminders', 'money', 'people', 'facts', 'gmail_seen']) s[k] ||= {};
   s.settings = { ...base.settings, ...s.settings };
   s.profile ||= base.profile;
   s.audit ||= [];

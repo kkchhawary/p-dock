@@ -2,8 +2,9 @@
 // Har action ke saath undo ki jaankari lautata hai, taaki UI mein "hatao" ho sake.
 import * as M from './model.js';
 import { resolvePlace } from './places.js';
+import { ingestFacts, FACT_KEYS } from './facts.js';
 
-export const ACTION_TYPES = ['note', 'reminder', 'money', 'person', 'settle_money', 'complete_reminder'];
+export const ACTION_TYPES = ['note', 'reminder', 'money', 'person', 'settle_money', 'complete_reminder', 'profile_fact'];
 
 const isoDate = (d) => (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null);
 const clean = (t, n = 2000) => String(t ?? '').trim().slice(0, n);
@@ -26,9 +27,9 @@ function upsertPerson(s, name, phone, relation) {
   });
 }
 
-export function applyActions(s, actions = []) {
+export function applyActions(s, actions = [], source = { kind: 'chat', id: null, label: 'Chat' }) {
   const done = [];
-  for (const a of actions.slice(0, 12)) {
+  for (const a of actions.slice(0, 20)) {
     if (!a || !ACTION_TYPES.includes(a.type)) continue;
 
     if (a.type === 'note' && clean(a.text)) {
@@ -68,6 +69,13 @@ export function applyActions(s, actions = []) {
       const before = M.findPerson(s, a.person);
       const p = upsertPerson(s, a.person, a.phone, a.relation);
       done.push({ label: `👤 ${p.name}${p.phone ? ` · ${p.phone}` : ''}${p.relation ? ` (${p.relation})` : ''}`, undo: before ? null : { coll: 'people', id: p.id, op: 'delete' } });
+    }
+
+    if (a.type === 'profile_fact' && clean(a.text) && a.key) {
+      const before = new Set(Object.keys(s.facts || {}));
+      ingestFacts(s, [{ key: a.key, value: clean(a.text, 300), about: a.about }], source, isoDate(a.date));
+      const created = Object.keys(s.facts || {}).find((id) => !before.has(id));
+      if (created) done.push({ label: `🪪 ${FACT_KEYS[a.key]?.[0] || a.key}: ${clean(a.text, 80)}`, undo: { coll: 'facts', id: created, op: 'delete' } });
     }
 
     if (a.type === 'settle_money') {

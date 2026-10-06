@@ -72,11 +72,20 @@ Main use `app/js/config.js` mein daal dunga.
 - Ek device par kuch daalo, wo doosre par apne aap aa jaayega (Google Drive se).
 - 10 minute kuch na karo, ya app 3 minute band rahe, to wo apne aap lock ho jaata hai.
 
+## 🪪 Mera Profile (apne aap bharta hai)
+Documents, bills, Gmail aur chat se P-Dock aapki jaankari **khud** ikattha karta hai, taaki form bharte waqt sab ek jagah ho:
+- Naam, janm tithi, pita/maa/pati-patni, pata, phone, email, PAN, Aadhaar, DL, passport, gaadi number, bank, UPI, naukri, padhai, insurance, parivaar, blood group, allergy, dawai, doctor…
+- **Bina AI ke bhi:** PAN, Aadhaar, DL aur gaadi number jaise number seedha document se nikalte hain. Poore number sirf aapke vault mein rehte hain.
+- Har jaankari ke saath likha hota hai ki wo **kahan se mili**. Har field ke paas 📋 Copy button hai, aur upar "Sab copy karo" bhi.
+- **Takraar:** do jagah alag pata mila to dono dikhte hain, aur aap "Yeh sahi hai" se pakka karte ho. Galat jaankari ✕ se hatao.
+- Kisi aur ka document (jaise patni ka Aadhaar) aapke profile mein nahi jaata. AI use "Parivaar" mein rakhta hai.
+
 ## Gmail se bills
 Settings → **Gmail mein bills dhoondo**. P-Dock sirf bill / invoice / receipt / policy / ticket wale mail dhoondhta hai aur unke PDF/photo ki list dikhata hai. Aap tick karke chunte ho kaunse laane hain.
 - Permission sirf **padhne** ki hai (`gmail.readonly`). Koi mail bheja ya mitaya nahi jaata.
 - Sab browser ke andar hota hai. Mail kisi server par nahi jaate. Laaye gaye bills baaki documents ki tarah encrypt hokar aapke Drive mein jaate hain.
 - Jo bill pehle laa chuke ho, wo "Pehle se hai" dikhte hain, isliye duplicate nahi banta.
+- **Roz apne aap:** Settings mein "Roz apne aap Gmail dekho" on karo. Din mein ek baar (jab app kholo aur Google juda ho) naye bills apne aap aa jaayenge. AI key ho to order, booking, policy, salary jaise mails se aapki jaankari, reminders (yatra, appointment, due date) aur yaadein bhi ban jaati hain. Promotions/social mail nahi dekhe jaate.
 - Password wali PDF (jaise bank statement) aa jaayegi aur khulegi bhi, lekin P-Dock uska text nahi padh sakta.
 
 ## Suraksha
@@ -85,9 +94,12 @@ Settings → **Gmail mein bills dhoondo**. P-Dock sirf bill / invoice / receipt 
 - **Password + recovery code dono kho gaye to data koi nahi khol sakta**, P-Dock banane wala bhi nahi.
 - Lock screen par dikhta hai: *"Yeh Krishan ka P-Dock hai. Main sirf Krishan ya mere boss ko bataunga."*
 
+## Aage: health data
+iPhone ke Health app (steps, exercise) ka data koi website khud nahi padh sakti; Apple ye permission sirf native apps ko deta hai. Medical reports, dawai, allergy aur blood group abhi se P-Dock mein rakh sakte ho. Roz ke steps apne aap laane ke liye aage iPhone Shortcut ya chhota native app banega.
+
 ## Developer notes
 - Pure static web app (`app/`), koi server nahi. Build step nahi.
-- `npm test` chalata hai 29 tests: encryption, password/recovery/Face ID unlock, do devices ka merge, nakli Google Drive ke saath poora sync (Mac → Drive → iPhone → delete → Mac), udhaar/reminders/log actions, calendar events, location matching, Gmail attachment parsing, aur local mode mein Drive ko na chhoona.
+- `npm test` chalata hai 39 tests: encryption, password/recovery/Face ID unlock, do devices ka merge, nakli Google Drive ke saath poora sync (Mac → Drive → iPhone → delete → Mac), udhaar/reminders/log actions, calendar events, location matching, Gmail attachment parsing, local mode mein Drive ko na chhoona, aur Mera Profile (number nikaalna, dusre ka document na jodna, takraar, merge).
 - `npm run dev` se local preview: http://localhost:5173
-- Files: `js/crypto.js` (taala), `js/model.js` (data + merge), `js/vault.js` (save + sync), `js/drive.js` (Google Drive), `js/calendar.js`, `js/passkey.js` (Face ID), `js/ocr.js` (browser OCR: pdf.js + Tesseract), `js/ai.js` (Claude), `js/actions.js` (chat se udhaar/reminder/log), `js/places.js` (jagah wale reminder), `js/gmail.js` (Gmail se bills), `js/app.js` (UI).
+- Files: `js/crypto.js` (taala), `js/model.js` (data + merge), `js/vault.js` (save + sync), `js/drive.js` (Google Drive), `js/calendar.js`, `js/passkey.js` (Face ID), `js/ocr.js` (browser OCR: pdf.js + Tesseract), `js/ai.js` (Claude), `js/actions.js` (chat se udhaar/reminder/log), `js/places.js` (jagah wale reminder), `js/gmail.js` (Gmail se bills), `js/facts.js` (Mera Profile), `js/app.js` (UI).
 - Purana Mac/terminal wala version `old-mac-version/` mein hai (git mein nahi).
