@@ -47,7 +47,13 @@ async function imageToCanvas(blob) {
 export async function readDocument(bytes, mime, onProgress) {
   if (mime === 'application/pdf') {
     const lib = await getPdfjs();
-    const pdf = await lib.getDocument({ data: bytes.slice() }).promise;
+    let pdf;
+    try {
+      pdf = await lib.getDocument({ data: bytes.slice() }).promise;
+    } catch (e) {
+      if (e?.name === 'PasswordException') throw new Error('Is PDF par password hai (jaise bank statement) — file khul jaayegi, par P-Dock iska text nahi padh sakta');
+      throw e;
+    }
     const pages = [];
     for (let i = 1; i <= Math.min(pdf.numPages, 30); i++) {
       const page = await pdf.getPage(i);

@@ -25,13 +25,16 @@ export const getHeader = () => header;
 export const device = () => (/iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Mac/.test(navigator.userAgent) ? 'Mac' : 'Browser');
 
 // ---------- shuruaat ----------
+let mode = null; // 'drive' | 'local' — local mode mein Drive par kabhi kuch nahi jaata
+
 export async function loadLocalHeader() {
   header = (await idb.kvGet('header')) || null;
+  mode = (await idb.kvGet('mode')) || null;
   return header;
 }
 
-export async function setMode(mode) { await idb.kvSet('mode', mode); }
-export const getMode = () => idb.kvGet('mode'); // 'drive' | 'local'
+export async function setMode(m) { mode = m; await idb.kvSet('mode', m); }
+export const getMode = async () => (mode ??= (await idb.kvGet('mode')) || null);
 
 // Naye device par: Drive mein pehle se vault hai?
 export async function fetchRemoteHeader() {
@@ -172,7 +175,7 @@ export function mergeHeaders(a, b) {
 // ---------- Google Drive sync ----------
 export function scheduleSync(delay = 2500) {
   clearTimeout(syncTimer);
-  if (!key || !drive.hasToken()) return;
+  if (!key || mode !== 'drive' || !drive.hasToken()) return;
   syncTimer = setTimeout(() => sync().catch((e) => emit({ syncError: e.message })), delay);
 }
 
@@ -182,7 +185,7 @@ export function sync() {
 }
 
 async function doSync() {
-  if (!key) return;
+  if (!key || mode !== 'drive') return;
   emit({ syncing: true });
   const files = await drive.listFiles();
   const byName = new Map(files.map((f) => [f.name, f]));
@@ -233,4 +236,5 @@ export async function forgetDevice() {
   drive.disconnect();
   await idb.wipeDevice();
   header = null;
+  mode = null;
 }

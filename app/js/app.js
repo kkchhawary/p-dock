@@ -101,7 +101,7 @@ function showApp() {
   $('#app').classList.remove('hidden');
   updateSyncPill();
   route();
-  if (drive.hasToken()) V.sync().catch((e) => toast(e.message));
+  V.getMode().then((m) => { if (m === 'drive' && drive.hasToken()) V.sync().catch((e) => toast(e.message)); });
 }
 
 async function boot() {
@@ -293,6 +293,7 @@ const routes = [
   [/^#\/notes(?:\/(\w+))?$/, 'notes', (tab) => renderNotes(tab || '')],
   [/^#\/me$/, 'me', renderMe],
   [/^#\/settings$/, 'settings', renderSettings],
+  [/^#\/gmail$/, 'settings', renderGmail],
 ];
 async function route() {
   if (!V.isUnlocked()) return;
@@ -552,17 +553,22 @@ async function uploadFiles(files) {
   if (ok.length < files.length) toast('Sirf PDF ya photo (JPG/PNG/HEIC) chalegi');
   for (const f of ok) {
     if (f.size > 25 * 1024 * 1024) { toast(`${f.name}: 25MB se badi file`); continue; }
-    const bytes = new Uint8Array(await f.arrayBuffer());
     const mime = f.type || (f.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
-    const doc = M.putDoc(S(), {
-      id: M.newId(), title: f.name.replace(/\.[^.]+$/, ''), doc_type: 'other', category: 'other',
-      file_name: f.name, mime, size: f.size, status: 'processing', created_at: M.nowIso(), fields: [], tags: [],
-    });
-    await V.putFile(doc.id, bytes);
-    V.audit('document_upload', doc.file_name);
-    await V.save();
-    runPipeline(doc.id, bytes);
+    await addDocument(new Uint8Array(await f.arrayBuffer()), f.name, mime);
   }
+}
+
+// Naya document vault mein: encrypt karke save, phir background mein padhna
+async function addDocument(bytes, fileName, mime, source = null) {
+  const doc = M.putDoc(S(), {
+    id: M.newId(), title: fileName.replace(/\.[^.]+$/, ''), doc_type: 'other', category: 'other',
+    file_name: fileName, mime, size: bytes.length, status: 'processing', created_at: M.nowIso(), fields: [], tags: [], source,
+  });
+  await V.putFile(doc.id, bytes);
+  V.audit('document_upload', source?.gmail ? `${fileName} (Gmail)` : fileName);
+  await V.save();
+  runPipeline(doc.id, bytes);
+  return doc;
 }
 
 async function runPipeline(id, bytes) {
@@ -574,11 +580,11 @@ async function runPipeline(id, bytes) {
       onProgress: (t) => { progress.set(id, t); if (location.hash === '#/docs') loadDocs(); },
     });
     if (!V.isUnlocked()) return;
-    M.putDoc(S(), { ...S().docs[id], ...info });
+    M.putDoc(S(), { ...S().docs[id], ...info, error: null });
   } catch (e) {
     console.error(e);
     if (!V.isUnlocked()) return;
-    M.putDoc(S(), { ...S().docs[id], status: 'error' });
+    M.putDoc(S(), { ...S().docs[id], status: 'error', error: String(e.message || e).slice(0, 200) });
   } finally {
     progress.delete(id);
   }
@@ -611,7 +617,9 @@ async function renderDoc(id) {
       <div class="stack">
         <div class="card stack">
           <div class="row wrap">${statusBadge(d.status)}${!progress.has(id) ? `<button class="btn small" id="reprocess">🔄 Dobara padho${S().settings.ai_key ? ' (AI se)' : ''}</button>` : ''}</div>
+          ${d.status === 'error' && d.error ? `<p class="muted">⚠️ ${esc(d.error)}</p>` : ''}
           ${d.summary ? `<p>${esc(d.summary)}</p>` : ''}
+          ${d.source?.gmail ? `<p class="muted">📧 Gmail se: ${esc(d.source.subject || '')}${d.source.from ? ` — ${esc(d.source.from)}` : ''}</p>` : ''}
           ${(d.questions || []).map((q, i) => `<form class="qbox" data-q="${i}"><div class="q">❓ ${esc(q)}</div>
             <div class="row"><input name="a" placeholder="Jawab likho…" required autocomplete="off"><button class="btn small primary">Batao</button></div></form>`).join('')}
           ${d.bill ? billHtml(d.bill) : ''}
@@ -885,6 +893,88 @@ function lifePeople(s, box) {
 }
 
 // =====================================================================
+// GMAIL SE BILLS
+// =====================================================================
+let gmailResults = null;
+
+async function renderGmail() {
+  const { hasToken, SCOPE_GMAIL } = drive;
+  view.innerHTML = `
+    <div class="head"><div><a href="#/settings">← Settings</a><h2>📧 Gmail se bills</h2></div></div>
+    <div class="card stack">
+      <p class="muted">P-Dock aapke Gmail mein sirf bill, invoice, receipt, policy, ticket jaise mail dhoondhega aur unke PDF/photo dikhayega.
+      Aap chunoge kaunse laane hain. Gmail ki permission sirf <strong>padhne</strong> ki hai — koi mail bheja ya mitaya nahi jaata, aur mail kisi server par nahi jaate.</p>
+      <div class="row wrap"><label class="row">Kitne purane<select id="gm-days"><option value="90">3 mahine</option><option value="365" selected>1 saal</option><option value="1095">3 saal</option></select></label>
+      <button class="btn primary" id="gm-scan">🔍 Gmail mein bills dhoondo</button></div>
+      <p class="progress" id="gm-progress"></p>
+    </div>
+    <div id="gm-results" class="spaced-top"></div>`;
+
+  const drawResults = () => {
+    const box = $('#gm-results');
+    if (!gmailResults) return;
+    if (!gmailResults.length) { box.innerHTML = '<p class="muted">Koi bill wala mail nahi mila.</p>'; return; }
+    const imported = new Set(M.liveDocs(S()).filter((d) => d.source?.gmail).map((d) => `${d.source.gmail}|${d.file_name}`));
+    let fresh = 0;
+    box.innerHTML = `<form id="gm-form" class="stack">
+      <div class="list">${gmailResults.map((m, mi) => m.attachments.map((a, ai) => {
+        const done = imported.has(`${m.id}|${a.filename}`);
+        if (!done) fresh++;
+        return `<label class="item ${done ? 'faded' : ''}"><input type="checkbox" class="tick" name="pick" value="${mi}:${ai}" ${done ? 'disabled' : 'checked'}>
+          <span class="grow"><div class="t">${esc(a.filename)}</div><div class="s">${esc(m.date)} · ${esc(m.from)} · ${esc(m.subject)}</div></span>
+          ${done ? '<span class="badge ok">Pehle se hai</span>' : `<span class="badge">${Math.max(1, Math.round(a.size / 1024))} KB</span>`}</label>`;
+      }).join('')).join('')}</div>
+      ${fresh ? `<div class="row ask-bar"><button class="btn primary" id="gm-import">⬇︎ Chune hue P-Dock mein lao</button><button type="button" class="btn" id="gm-none">Sab hatao</button></div>` : '<p class="muted">Saare bills pehle se P-Dock mein hain. 👍</p>'}
+    </form>`;
+    $('#gm-none')?.addEventListener('click', () => box.querySelectorAll('input[name=pick]:not(:disabled)').forEach((c) => { c.checked = false; }));
+    $('#gm-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const picks = [...box.querySelectorAll('input[name=pick]:checked')].map((c) => c.value.split(':').map(Number));
+      if (!picks.length) { toast('Kuch chuna nahi'); return; }
+      const { downloadAttachment } = await import('./gmail.js');
+      const btn = $('#gm-import');
+      btn.disabled = true;
+      let n = 0;
+      for (const [mi, ai] of picks) {
+        const m = gmailResults[mi];
+        const a = m.attachments[ai];
+        btn.textContent = `Laa raha hoon… ${++n}/${picks.length}`;
+        try {
+          const bytes = await downloadAttachment(m.id, a.attachmentId);
+          await addDocument(bytes, a.filename, a.mimeType, { gmail: m.id, subject: m.subject.slice(0, 150), from: m.from.slice(0, 80), date: m.date });
+        } catch (x) { toast(`${a.filename}: ${x.message}`); }
+      }
+      V.audit('gmail_import', `${n} files`);
+      await V.save();
+      toast(`${n} bills aa gaye — ab padh raha hoon`);
+      location.hash = '#/docs';
+    };
+  };
+
+  $('#gm-scan').onclick = async () => {
+    try {
+      if (!hasToken(SCOPE_GMAIL)) await drive.connect({ gmail: true, calendar: S().settings.calendar_sync });
+      const { findBills } = await import('./gmail.js');
+      $('#gm-scan').disabled = true;
+      gmailResults = await findBills({
+        days: Number($('#gm-days').value),
+        onProgress: (i, n) => { $('#gm-progress').textContent = `Mail dekh raha hoon… ${i}/${n}`; },
+      });
+      $('#gm-progress').textContent = `${gmailResults.length} mail mile jinmein bill/document hai.`;
+      V.audit('gmail_scan', `${gmailResults.length} mail`);
+      drawResults();
+    } catch (x) {
+      toast(x.message);
+      $('#gm-progress').textContent = '';
+    } finally {
+      const b = $('#gm-scan');
+      if (b) b.disabled = false;
+    }
+  };
+  drawResults();
+}
+
+// =====================================================================
 // ABOUT ME
 // =====================================================================
 function renderMe() {
@@ -919,6 +1009,7 @@ const AUDIT_LABEL = {
   document_download: 'Download', document_edit: 'Document edit', document_delete: 'Document delete', note_create: 'Yaad save',
   note_delete: 'Yaad hatai', profile_edit: 'Profile edit', ask: 'Sawaal poochha', password_changed: 'Password badla',
   passkey_added: 'Face ID joda', passkey_removed: 'Face ID hataya', recovery_code_changed: 'Naya recovery code',
+  gmail_scan: 'Gmail mein bills dhoondhe', gmail_import: 'Gmail se bills laaye',
   settings_changed: 'Settings badli',
 };
 
@@ -939,6 +1030,12 @@ async function renderSettings() {
           : drive.driveConfigured()
             ? '<p class="muted">Abhi data sirf is device par hai. Google Drive se jodo taaki iPhone aur Mac dono par mile, aur phone kho jaaye to bhi data bacha rahe.</p><div><button class="btn primary" id="go-drive">Google Drive se jodo</button></div>'
             : '<p class="muted">Abhi data sirf is device par hai. Google Drive ka setup baaki hai.</p>'}
+      </div>
+
+      <div class="card sect">
+        <h3>📧 Gmail se bills</h3>
+        <p class="muted">Mail mein aaye bills, invoices, policies, tickets ke PDF ek click mein P-Dock mein. Sirf padhne ki permission; aap chunte ho kya aaye.</p>
+        <div><a class="btn primary" href="#/gmail">Gmail mein bills dhoondo</a></div>
       </div>
 
       <div class="card sect">

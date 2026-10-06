@@ -78,6 +78,7 @@ test('Mac: vault banao, document + yaad daalo, Google Drive par sync', async () 
 test('iPhone: naya device, Drive se vault mila, password se khula, sab data aa gaya', async () => {
   await idb.wipeDevice();
   assert.equal(await V.loadLocalHeader(), null);
+  await V.setMode('drive'); // "Google Drive se jodo" button yahi karta hai
   const header = await V.fetchRemoteHeader();
   assert.equal(header.owner, 'Krishan');
   await assert.rejects(V.unlockPassword('galat'), /Password galat/);
@@ -119,6 +120,20 @@ test('Mac wapas aaya (purani copy + offline badlav): delete wapas nahi aata, don
   await assert.rejects(V.unlockPassword('mac-ka-password'), /Password galat/);
   await V.unlockPassword('naya-password-123');
   assert.equal(M.liveNotes(V.state).length, 3);
+  V.lock();
+});
+
+test('"sirf is device par" mode mein Drive par kuch nahi jaata, Google login hone par bhi', async () => {
+  await idb.wipeDevice();
+  await V.loadLocalHeader();
+  await V.setMode('local');
+  const before = requests.length;
+  await V.createVault({ password: 'local-pass-123', ownerName: 'K' });
+  M.addNote(V.state, 'sirf mere phone par');
+  await V.save();
+  await V.sync();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(requests.length, before, 'koi Drive request nahi honi chahiye');
   V.lock();
 });
 

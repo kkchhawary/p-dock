@@ -4,6 +4,7 @@ import { GOOGLE_CLIENT_ID } from './config.js';
 
 const SCOPE_DRIVE = 'https://www.googleapis.com/auth/drive.appdata';
 export const SCOPE_CALENDAR = 'https://www.googleapis.com/auth/calendar.events';
+export const SCOPE_GMAIL = 'https://www.googleapis.com/auth/gmail.readonly';
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 
@@ -35,10 +36,10 @@ function loadGis() {
 }
 
 // Button dabane par hi bulana (popup ke liye user ka tap zaroori hai)
-export async function connect({ calendar = false } = {}) {
+export async function connect({ calendar = false, gmail = false } = {}) {
   if (!driveConfigured()) throw new Error('Google setup abhi baaki hai');
   await loadGis();
-  const scopes = [SCOPE_DRIVE, ...(calendar ? [SCOPE_CALENDAR] : [])];
+  const scopes = [SCOPE_DRIVE, ...(calendar ? [SCOPE_CALENDAR] : []), ...(gmail ? [SCOPE_GMAIL] : [])];
   return new Promise((resolve, reject) => {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
@@ -48,6 +49,7 @@ export async function connect({ calendar = false } = {}) {
         if (resp.error) return reject(new Error('Google ne permission nahi di'));
         const granted = resp.scope || '';
         if (!granted.includes(SCOPE_DRIVE)) return reject(new Error('Drive ki permission zaroori hai'));
+        if (gmail && !granted.includes(SCOPE_GMAIL)) return reject(new Error('Gmail padhne ki permission nahi mili — Google screen par Gmail wala box tick karna'));
         token = { access_token: resp.access_token, expires_at: Date.now() + resp.expires_in * 1000, scopes: granted };
         try { sessionStorage.setItem('pdock-gtoken', JSON.stringify(token)); } catch {}
         resolve(token);

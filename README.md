@@ -18,6 +18,7 @@ iPhone aur Mac dono par ek app ki tarah chalta hai. Na terminal chahiye, na Mac 
 | App ka code | GitHub Pages par. Wahan **sirf code** hai, aapka data kabhi nahi jaata. |
 | AI (agar chalu karo) | Sawaal + documents ki details (Aadhaar/PAN chhupa ke) Anthropic (Claude) ko jaati hain. |
 | Reminders (agar chalu karo) | Google Calendar mein sirf chhota title ("DL expire ho raha hai", "Naresh se ₹500 lene hain"). |
+| Gmail (agar use karo) | Sirf padhne ki permission. Sirf aapke chune hue bills aate hain. |
 | Location (agar chalu karo) | Sirf phone ke andar match hoti hai, kahin nahi bheji jaati. |
 
 P-Dock ko Google Drive ke **sirf apne chhupe folder** ki permission hai (`drive.appdata`). Aapki baaki Drive files tak uski koi pahunch nahi.
@@ -32,7 +33,7 @@ P-Dock ko Google Drive ke **sirf apne chhupe folder** ki permission hai (`drive.
 ### 2. Google Cloud (Drive mein likhne ki permission)
 1. https://console.cloud.google.com kholo, apne Google account se.
 2. Upar **Select a project → New Project** → naam `P-Dock` → **Create**.
-3. **APIs & Services → Library**: "**Google Drive API**" → Enable. Phir "**Google Calendar API**" → Enable.
+3. **APIs & Services → Library**: "**Google Drive API**" → Enable. Phir "**Google Calendar API**" → Enable. Phir "**Gmail API**" → Enable.
 4. **APIs & Services → OAuth consent screen** (ya "Google Auth Platform"):
    - User type: **External** → App name `P-Dock` → apna email → Save.
    - **Audience / Test users** mein apna Gmail address jodo. (App "Testing" mode mein hi rahega; sirf aap use kar sakte ho.)
@@ -71,6 +72,13 @@ Main use `app/js/config.js` mein daal dunga.
 - Ek device par kuch daalo, wo doosre par apne aap aa jaayega (Google Drive se).
 - 10 minute kuch na karo, ya app 3 minute band rahe, to wo apne aap lock ho jaata hai.
 
+## Gmail se bills
+Settings → **Gmail mein bills dhoondo**. P-Dock sirf bill / invoice / receipt / policy / ticket wale mail dhoondhta hai aur unke PDF/photo ki list dikhata hai. Aap tick karke chunte ho kaunse laane hain.
+- Permission sirf **padhne** ki hai (`gmail.readonly`). Koi mail bheja ya mitaya nahi jaata.
+- Sab browser ke andar hota hai. Mail kisi server par nahi jaate. Laaye gaye bills baaki documents ki tarah encrypt hokar aapke Drive mein jaate hain.
+- Jo bill pehle laa chuke ho, wo "Pehle se hai" dikhte hain, isliye duplicate nahi banta.
+- Password wali PDF (jaise bank statement) aa jaayegi aur khulegi bhi, lekin P-Dock uska text nahi padh sakta.
+
 ## Suraksha
 - Har cheez device par hi AES-256 se encrypt hoti hai, phir Google Drive jaati hai.
 - Vault password se chaabi banti hai (PBKDF2, 600,000 rounds). Face ID se bhi chaabi khulti hai (WebAuthn PRF); ye sirf darwaza nahi, asli taala hai.
@@ -79,7 +87,7 @@ Main use `app/js/config.js` mein daal dunga.
 
 ## Developer notes
 - Pure static web app (`app/`), koi server nahi. Build step nahi.
-- `npm test` chalata hai 24 tests: encryption, password/recovery/Face ID unlock, do devices ka merge, nakli Google Drive ke saath poora sync (Mac → Drive → iPhone → delete → Mac), udhaar/reminders/log actions, calendar events aur location matching.
+- `npm test` chalata hai 29 tests: encryption, password/recovery/Face ID unlock, do devices ka merge, nakli Google Drive ke saath poora sync (Mac → Drive → iPhone → delete → Mac), udhaar/reminders/log actions, calendar events, location matching, Gmail attachment parsing, aur local mode mein Drive ko na chhoona.
 - `npm run dev` se local preview: http://localhost:5173
-- Files: `js/crypto.js` (taala), `js/model.js` (data + merge), `js/vault.js` (save + sync), `js/drive.js` (Google Drive), `js/calendar.js`, `js/passkey.js` (Face ID), `js/ocr.js` (browser OCR: pdf.js + Tesseract), `js/ai.js` (Claude), `js/actions.js` (chat se udhaar/reminder/log), `js/places.js` (jagah wale reminder), `js/app.js` (UI).
+- Files: `js/crypto.js` (taala), `js/model.js` (data + merge), `js/vault.js` (save + sync), `js/drive.js` (Google Drive), `js/calendar.js`, `js/passkey.js` (Face ID), `js/ocr.js` (browser OCR: pdf.js + Tesseract), `js/ai.js` (Claude), `js/actions.js` (chat se udhaar/reminder/log), `js/places.js` (jagah wale reminder), `js/gmail.js` (Gmail se bills), `js/app.js` (UI).
 - Purana Mac/terminal wala version `old-mac-version/` mein hai (git mein nahi).
