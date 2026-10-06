@@ -1,0 +1,14 @@
+{
+  "name": "p-dock",
+  "version": "0.2.0",
+  "private": true,
+  "description": "P-Dock — Personal Dock web app (data aapke Google Drive mein, encrypted)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "dev": "python3 -m http.server 5173 --bind 127.0.0.1 --directory app"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5"
+  }
+}

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>P-Dock</title>
+  <meta name="description" content="Apne documents aur jaankari ka private AI vault">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://accounts.google.com 'wasm-unsafe-eval' blob:; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://api.anthropic.com https://cdn.jsdelivr.net data: blob:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline' https://accounts.google.com; frame-src 'self' blob: https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="P-Dock">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Pehli baar / lock screen -->
+  <div id="gate" class="gate hidden">
+    <div class="gate-card" id="gate-card"></div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="hidden">
+    <nav class="nav">
+      <div class="brand"><img src="icon.svg" alt=""><span>P-Dock</span></div>
+      <a href="#/" data-nav="home"><span class="ic">💬</span><span>Poochho</span></a>
+      <a href="#/docs" data-nav="docs"><span class="ic">📁</span><span>Documents</span></a>
+      <a href="#/notes" data-nav="notes"><span class="ic">🧠</span><span>Yaadein</span></a>
+      <a href="#/me" data-nav="me"><span class="ic">🙂</span><span>Mere baare mein</span></a>
+      <a href="#/settings" data-nav="settings"><span class="ic">⚙️</span><span>Settings</span></a>
+      <div class="nav-foot">
+        <button class="sync-pill" id="sync-pill" type="button"></button>
+        <button class="lock" id="lock-btn" type="button">🔐 Lock</button>
+      </div>
+    </nav>
+    <header class="topbar">
+      <button class="sync-pill" id="sync-pill-m" type="button"></button>
+      <button class="lock-m" id="lock-btn-m" type="button" aria-label="Lock">🔐</button>
+    </header>
+    <main id="view"></main>
+  </div>
+
+  <dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="js/app.js" type="module"></script>
+</body>
+</html>

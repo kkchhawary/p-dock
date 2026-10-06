@@ -1,0 +1,4 @@
+node_modules/
+old-mac-version/
+.claude/
+.DS_Store
